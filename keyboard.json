@@ -40,19 +40,19 @@
                 "cols": ["GP12", "GP11", "GP10", "GP9", "GP8"],
                 "rows": ["GP2", "GP3", "GP4", "GP13", "GP18", "GP19"]
             }
+        },
+        "encoder": {
+            "right": {
+                "rotary": [
+                    {"pin_a": "GP16", "pin_b": "GP17",  "resolution": 4}
+                ]
+            }
         }
     },
     "encoder": {
         "rotary": [
             {"pin_a": "GP16", "pin_b": "GP17",  "resolution": 4}
         ]
-    },
-    "split_encoder": {
-        "right": {
-            "rotary": [
-                {"pin_a": "GP16", "pin_b": "GP17",  "resolution": 4}
-            ]
-        }
     },
     "ws2812": {
         "driver": "vendor"

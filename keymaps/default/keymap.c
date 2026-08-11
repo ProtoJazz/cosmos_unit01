@@ -56,24 +56,43 @@ void user_sync_handler(uint8_t in_buflen, const void* in_data,
 
 void keyboard_post_init_user(void) {
     transaction_register_rpc(USER_SYNC_A, user_sync_handler);
-    gpio_set_pin_input_high(GP20);  // encoder press pin, both halves
+    gpio_set_pin_input_high(USER_ENCODER_BTN_PIN);  // both halves
 }
 
 // ---------------------------------------------------------------------------
-// Master: read own (left) encoder press + poll slave (right) encoder press
+// Encoder button
+//
+// What a press does depends on which *hand* it came from, not on which half
+// happens to be master -- with EE_HANDS either side can be the USB side.
 // ---------------------------------------------------------------------------
-void matrix_scan_user(void) {
-    // Left encoder press = play/pause (master side, direct GPIO read)
-    static bool left_btn_prev = false;
-    bool left_btn = !gpio_read_pin(GP20);
-    if (left_btn && !left_btn_prev) {
+
+// Rising-edge detect on this half's own button.
+static bool encoder_btn_tapped(void) {
+    static bool prev = false;
+    bool        now  = !gpio_read_pin(USER_ENCODER_BTN_PIN);
+    bool        edge = now && !prev;
+    prev             = now;
+    return edge;
+}
+
+// Runs on the master only; `from_left` says which hand produced the press.
+static void handle_encoder_btn(bool from_left) {
+    if (from_left) {
         tap_code(KC_MPLY);
+    } else {
+        kb_state.display_mode = (kb_state.display_mode + 1) % NUM_DISPLAY_MODES;
     }
-    left_btn_prev = left_btn;
 }
 
 void housekeeping_task_user(void) {
+    bool my_tap = encoder_btn_tapped();
+
     if (is_keyboard_master()) {
+        // Our own button: act on it directly, tagged with our own handedness.
+        if (my_tap) {
+            handle_encoder_btn(is_keyboard_left());
+        }
+
         // Sync once every 50ms
         static uint32_t last_sync = 0;
         if (timer_elapsed32(last_sync) > 50) {
@@ -84,20 +103,15 @@ void housekeeping_task_user(void) {
                     sizeof(kb_state), &kb_state,
                     sizeof(slave_pressed), &slave_pressed)) {
                 if (slave_pressed) {
-                    // Right encoder pressed -> cycle display mode
-                    kb_state.display_mode =
-                        (kb_state.display_mode + 1) % NUM_DISPLAY_MODES;
+                    // The slave is whichever hand we are not.
+                    handle_encoder_btn(!is_keyboard_left());
                 }
             }
         }
     } else {
-        // Slave: detect our own (right) encoder button press edge
-        static bool prev = false;
-        bool now = !gpio_read_pin(GP20);
-        if (now && !prev) {
+        if (my_tap) {
             slave_btn_event = true;  // latch; master reads it on next sync
         }
-        prev = now;
     }
 }
 
@@ -126,23 +140,28 @@ oled_rotation_t oled_init_user(oled_rotation_t rotation) {
     }
 }
 
+// Rotated 90/270 on a 128x64 panel, so the usable text area is 8 cols x 16 rows.
 static void render_info(void) {
+    oled_write_ln_P(PSTR("Cosmos"), false);
+    oled_write_ln_P(PSTR("Unit 01"), false);
+    oled_write_ln_P(PSTR(""), false);
+
+    // Handedness comes from EEPROM (EE_HANDS). If both halves show the same
+    // side here, the handedness value was never written -- reflash per readme.
+    oled_write_ln_P(is_keyboard_left() ? PSTR("Left") : PSTR("Right"), false);
+    oled_write_ln_P(is_keyboard_master() ? PSTR("USB") : PSTR("link"), false);
+    oled_write_ln_P(PSTR(""), false);
+
     if (is_keyboard_master()) {
-        oled_write_ln_P(PSTR("   Cosmos"), false);
-        oled_write_ln_P(PSTR("   Unit 01"), false);
-        oled_write_ln_P(PSTR(""), false);
-        oled_write_ln_P(PSTR("   Layer:"), false);
+        oled_write_ln_P(PSTR("Layer:"), false);
         switch (get_highest_layer(layer_state)) {
-            case 0:  oled_write_ln_P(PSTR("   Base"),  false); break;
-            case 1:  oled_write_ln_P(PSTR("   Sym"),   false); break;
-            default: oled_write_ln_P(PSTR("   Other"), false);
+            case 0:  oled_write_ln_P(PSTR("Base"),  false); break;
+            case 1:  oled_write_ln_P(PSTR("Sym"),   false); break;
+            default: oled_write_ln_P(PSTR("Other"), false);
         }
         oled_write_ln_P(PSTR(""), false);
         led_t led_state = host_keyboard_led_state();
         oled_write_P(led_state.caps_lock ? PSTR("CAPS") : PSTR("    "), false);
-    } else {
-        oled_write_ln_P(PSTR("   Cosmos"), false);
-        oled_write_ln_P(PSTR("   Right"), false);
     }
 }
 
